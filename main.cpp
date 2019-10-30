@@ -1,112 +1,175 @@
 #include <iostream>
-#include <mpi.h>
 #include <cmath>
 
-#include <iostream>
-#include <cstring>
+#include <mpi.h>
 
-#define MASTER 0
 
-int N;
-int P;
-int Q;
-int N_over_Q;
 
-int* completeMatrix = nullptr;
-int** subMatrix;
+
+
+constexpr int MASTER = 0;
+
+
 
 void min_plus_matrix_multiply(int* own, const int* other);
 
+
+
 int main(int argc, char *argv[]) {
-    int rank;
+
+    // setup
+    double startTime, endTime;
+    int N, P, Q, N_OVER_Q, MATRIX_SIZE;
+    int *completeMatrix = nullptr, *myMatrix, *otherMatrix;
+
+    MPI_Comm commGrid, commRow;
+    int myWorldRank, myGridRank, coords[2], upRank, downRank;
+
+    std::cout << std::fixed;
+    std::cout.precision(2);
 
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &P);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myWorldRank);
 
-    if (rank == MASTER) {
+    // read input data, perform validation checks
+    if (myWorldRank == MASTER) {
 
         std::cin >> N;
 
-        Q = static_cast<int>(sqrt(P));
+        // number of processes (P) must be a square, size of myMatrix (N) must be divisible by Q
+        Q = static_cast<int>( sqrt(P) );
         if ((Q * Q) != P || N % Q != 0) {
             std::cout << "Incompatible values for P and N!" << std::endl;
             return EXIT_FAILURE;
         }
 
-        N_over_Q = N / Q;
+        // broadcast dimension data to other processes
+        N_OVER_Q = N / Q;
+        MATRIX_SIZE = N_OVER_Q*N_OVER_Q;
+        MPI_Bcast(&N, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
+        MPI_Bcast(&Q, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
+
+        // read myMatrix in structurally more useful manner
         completeMatrix = new int[N * N];
-        std::memset(completeMatrix, 0, N*N);
         for (int y = 0; y < N; ++y) {
             for (int x = 0; x < N; ++x) {
                 int i, j, k;
-                i = y/N_over_Q;
-                j = x/N_over_Q;
-                k = (y % N_over_Q)*N_over_Q + (x % N_over_Q);
+                i = y/N_OVER_Q;
+                j = x/N_OVER_Q;
+                k = (y % N_OVER_Q)*N_OVER_Q + (x % N_OVER_Q);
 
-                std::cin >> completeMatrix[i*N_over_Q*N + j*N_over_Q*N_over_Q + k];
+                std::cin >> completeMatrix[
+                        i*N_OVER_Q*N +
+                        j*MATRIX_SIZE +
+                        k];
             }
         }
 
-        for (int i = 0; i < P; ++i) {
-            std::cout << i << ":\t";
-            for (int j = 0; j < N_over_Q*N_over_Q; ++j) {
-                std::cout << completeMatrix[i*N_over_Q*N_over_Q + j] << " ";
-            }
-            std::cout << std::endl;
-        }
+        // start timing
+        MPI_Barrier(MPI_COMM_WORLD);
+        startTime = MPI_Wtime();
 
+    } else {
+        // receive dimension data
+        MPI_Bcast(&N, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
+        MPI_Bcast(&Q, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
+        N_OVER_Q = N / Q;
 
+        MPI_Barrier(MPI_COMM_WORLD);
     }
-    // broadcast N/Q
-    MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&Q, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    N_over_Q = N / Q;
+    MATRIX_SIZE = N_OVER_Q*N_OVER_Q;
 
-    // create cartesian grid communicator
-    int grid_rank, reorder, dims[2], periods[2], coords[2];
-    MPI_Comm grid_comm;
 
-    dims[0] = Q;
-    dims[1] = Q;
-    periods[0] = 1;
-    periods[1] = 1;
-    reorder = 0;
-    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &grid_comm);
-    MPI_Comm_rank(grid_comm, &grid_rank);
-    MPI_Cart_coords(grid_comm, grid_rank, 2, coords);
+    // create cartesian grid communicator, split into rows and gather info about own position / neighbours
+    const int dims[] = {Q, Q}, periods[] = {1, 1}, includedDims[] = {1, 0};
+    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 0, &commGrid);
+    MPI_Cart_sub(commGrid, includedDims, &commRow);
 
-    std::cout << grid_rank << " ; " << coords[0] << ':' << coords[1] << std::endl;
+    MPI_Comm_rank(commGrid, &myGridRank);
+    MPI_Cart_coords(commGrid, myGridRank, 2, coords);
 
-    // define sub-matrix type (?)
+    coords[0] -= 1;
+    MPI_Cart_rank(commGrid, coords, &upRank);
+    coords[0] += 2;
+    MPI_Cart_rank(commGrid, coords, &downRank);
+    coords[0] -= 1;
 
-    int* submatrix = new int[N_over_Q*N_over_Q];
-    MPI_Scatter(completeMatrix, N_over_Q*N_over_Q, MPI_INT, submatrix, N_over_Q*N_over_Q, MPI_INT, 0, grid_comm);
 
-    std::string data = std::to_string(coords[0]) + ":" + std::to_string(coords[1]) + ":\t";
-    for (int y = 0; y < N_over_Q; ++y) {
-        for (int x = 0; x < N_over_Q; ++x) {
-            data += std::to_string(submatrix[y*N_over_Q + x]);
-            data += " ";
-        }
-        data += " ; ";
-    }
-    std::cout << data << std::endl;
+    // scatter matrix
+    myMatrix = new int[N_OVER_Q * N_OVER_Q];
+    otherMatrix = new int[N_OVER_Q * N_OVER_Q];
+    MPI_Scatter(
+            completeMatrix, MATRIX_SIZE, MPI_INT,
+            myMatrix, MATRIX_SIZE, MPI_INT,
+            MASTER, commGrid
+    );
 
 
     // run fox's algorithm until D > N on all nodes
+    for (int D = 1; D < N; D *= 2) {
+
         // for q steps
+        for (int step = 0; step < Q; ++step) {
+
             // select starting nodes on diagonal, move diagonal by #step to the right
-            // broadcast matrix to complete row, multiply received matrices with own data
-            // send matrix to node directly above, multiply received matrix with own data
+            // broadcast myMatrix to complete row
+            auto activeRank = (step + coords[0]) % Q;
+            auto isActive = coords[1] == activeRank;
+            auto bcastMatrix = isActive ? myMatrix : otherMatrix;
+            MPI_Bcast(bcastMatrix, MATRIX_SIZE, MPI_INT, activeRank, commRow);
 
-            // NOTE: use min-plus-matrix multiplication: choose minimum > 0 after element-wise addition
+            // multiply received matrix with own matrix
+            if (!isActive) {
+                min_plus_matrix_multiply(myMatrix, otherMatrix);
+            }
+
+            // send myMatrix to node directly above, multiply received myMatrix with own data
+            MPI_Sendrecv(
+                    myMatrix, MATRIX_SIZE, MPI_INT, upRank, 0,
+                    otherMatrix, MATRIX_SIZE, MPI_INT, downRank, 0, commGrid, nullptr
+            );
+            min_plus_matrix_multiply(myMatrix, otherMatrix);
+        }
+    }
 
 
-    // gather sub-matrices into matrix
-    // print result / compare to to optional output file
+    // gather sub-matrices into myMatrix
+    MPI_Gather(myMatrix, MATRIX_SIZE, MPI_INT, completeMatrix, MATRIX_SIZE, MPI_INT, MASTER, MPI_COMM_WORLD);
 
-    MPI_Comm_free(&grid_comm);
+    // print result / compare to to optional output file, display computation time
+    if (myWorldRank == MASTER) {
+
+        endTime = MPI_Wtime();
+        std::cout << "Computations complete after " << endTime - startTime << " s:" << std::endl;
+
+        for (int y = 0; y < N; ++y) {
+            for (int x = 0; x < N; ++x) {
+                int i, j, k;
+                i = y / N_OVER_Q;
+                j = x / N_OVER_Q;
+                k = (y % N_OVER_Q) * N_OVER_Q + (x % N_OVER_Q);
+
+                std::cout << completeMatrix[
+                        i * N_OVER_Q * N +
+                        j * MATRIX_SIZE +
+                        k];
+                std::cout << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+    // cleanup
+    if (myWorldRank == MASTER) {
+        delete[] completeMatrix;
+    }
+    delete[] myMatrix;
+    delete[] otherMatrix;
+
+    MPI_Comm_free(&commGrid);
+    MPI_Comm_free(&commRow); // not sure if necessary, example does not include this
     MPI_Finalize();
+
+
     return EXIT_SUCCESS;
 }
