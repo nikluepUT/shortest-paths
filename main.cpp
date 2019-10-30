@@ -1,18 +1,13 @@
 #include <iostream>
+#include <mpi.h>
 #include <cmath>
 
 #include <mpi.h>
 
-
-
-
-
 constexpr int MASTER = 0;
 
-
-
-void min_plus_matrix_multiply(int* own, const int* other);
-
+void min_plus_matrix_multiply(int* own, int* other, int N_OVER_Q);
+void print_submatrix(int* matrix, int N_OVER_Q);
 
 
 int main(int argc, char *argv[]) {
@@ -121,7 +116,7 @@ int main(int argc, char *argv[]) {
 
             // multiply received matrix with own matrix
             if (!isActive) {
-                min_plus_matrix_multiply(myMatrix, otherMatrix);
+                min_plus_matrix_multiply(myMatrix, otherMatrix, N_OVER_Q);
             }
 
             // send myMatrix to node directly above, multiply received myMatrix with own data
@@ -129,7 +124,7 @@ int main(int argc, char *argv[]) {
                     myMatrix, MATRIX_SIZE, MPI_INT, upRank, 0,
                     otherMatrix, MATRIX_SIZE, MPI_INT, downRank, 0, commGrid, nullptr
             );
-            min_plus_matrix_multiply(myMatrix, otherMatrix);
+            min_plus_matrix_multiply(myMatrix, otherMatrix, N_OVER_Q);
         }
     }
 
@@ -172,4 +167,53 @@ int main(int argc, char *argv[]) {
 
 
     return EXIT_SUCCESS;
+}
+
+/**
+ * The min-plus product C of two matrices A and B is defined as:
+ * c_ij = min_k{a_ik + b_kj}
+ * In other words: c_ij is the smallest sum of A k's row and B k's column.
+ * The resulting product is copied to the own matrix.
+ *
+ * @param own vector representing a matrix with dimension nxn
+ * @param other vector representing a matrix with dimension nxn
+ * @param N_OVER_Q matrix dimension
+ */
+void min_plus_matrix_multiply(int* own, int* other, int N_OVER_Q){
+    int* result = new int[N_OVER_Q*N_OVER_Q];
+
+    int min = 0;
+    int tmp = 0;
+    for (int i = 0; i < N_OVER_Q*N_OVER_Q; ++i) {
+        min = own[i] + other[i];
+
+        for (int k = 0; k < N_OVER_Q; ++k) {
+            tmp = own[(i/N_OVER_Q)*N_OVER_Q + k] + other[k*N_OVER_Q + (i % N_OVER_Q)];
+            if (tmp < min){
+                min = tmp;
+            }
+        }
+        result[i] = min;
+    }
+
+    std::cout << "own:" << std::endl;
+    print_submatrix(own, N_OVER_Q);
+    std::cout << "other:" << std::endl;
+    print_submatrix(other, N_OVER_Q);
+
+    memcpy(own, result, N_OVER_Q*N_OVER_Q);
+    std::cout << "result:" << std::endl;
+    print_submatrix(own, N_OVER_Q);
+
+    exit(0);
+}
+
+void print_submatrix(int* matrix, int N_OVER_Q){
+    for (int i = 0; i < N_OVER_Q*N_OVER_Q; ++i) {
+        if (i > 0  && i % N_OVER_Q == 0){
+            std::cout << "\n";
+        }
+        std::cout << matrix[i] << " ";
+    }
+    std::cout << std::endl;
 }
