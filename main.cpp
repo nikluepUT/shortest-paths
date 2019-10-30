@@ -15,6 +15,7 @@ int N_over_Q;
 int* completeMatrix = nullptr;
 int** subMatrix;
 
+void min_plus_matrix_multiply(int* own, const int* other);
 
 int main(int argc, char *argv[]) {
     int rank;
