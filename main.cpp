@@ -6,8 +6,8 @@
 
 constexpr int MASTER = 0;
 
-void min_plus_matrix_multiply(int* own, int* other, int N_OVER_Q);
-void print_submatrix(int* matrix, int N_OVER_Q);
+void min_plus_matrix_multiply(const int* own, const int* other, const int N_OVER_Q);
+void print_submatrix(const int* matrix, const int N_OVER_Q);
 
 
 int main(int argc, char *argv[]) {
@@ -179,7 +179,7 @@ int main(int argc, char *argv[]) {
  * @param other vector representing a matrix with dimension nxn
  * @param N_OVER_Q matrix dimension
  */
-void min_plus_matrix_multiply(int* own, int* other, int N_OVER_Q){
+void min_plus_matrix_multiply(int* own, const int* other, const int N_OVER_Q){
     int* result = new int[N_OVER_Q*N_OVER_Q];
 
     int min = 0;
@@ -208,7 +208,7 @@ void min_plus_matrix_multiply(int* own, int* other, int N_OVER_Q){
     exit(0);
 }
 
-void print_submatrix(int* matrix, int N_OVER_Q){
+void print_submatrix(const int* matrix, const int N_OVER_Q){
     for (int i = 0; i < N_OVER_Q*N_OVER_Q; ++i) {
         if (i > 0  && i % N_OVER_Q == 0){
             std::cout << "\n";
