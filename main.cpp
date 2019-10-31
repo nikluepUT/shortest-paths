@@ -205,7 +205,8 @@ void min_plus_matrix_multiply(int* own, const int* other, const int N_OVER_Q){
     std::cout << "result:" << std::endl;
     print_submatrix(own, N_OVER_Q);
 
-    exit(0);
+    // cleanup
+    delete[] result;
 }
 
 void print_submatrix(const int* matrix, const int N_OVER_Q){
