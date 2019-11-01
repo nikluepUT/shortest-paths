@@ -1,14 +1,14 @@
 #include <iostream>
-#include <mpi.h>
 #include <cmath>
+#include <algorithm>
 
 #include <mpi.h>
 
 constexpr int MASTER = 0;
+constexpr int INF = 0;
 
-void min_plus_matrix_multiply(const int* own, const int* other, const int N_OVER_Q);
+void min_plus_matrix_multiply(int* own, const int* other, const int N);
 void print_submatrix(const int* matrix, const int N_OVER_Q);
-
 
 int main(int argc, char *argv[]) {
 
@@ -54,10 +54,15 @@ int main(int argc, char *argv[]) {
                 j = x/N_OVER_Q;
                 k = (y % N_OVER_Q)*N_OVER_Q + (x % N_OVER_Q);
 
-                std::cin >> completeMatrix[
+                int input;
+                std::cin >> input;
+                if (input == 0 && x != y) {
+                    input = INF;
+                }
+                completeMatrix[
                         i*N_OVER_Q*N +
                         j*MATRIX_SIZE +
-                        k];
+                        k] = input;
             }
         }
 
@@ -77,9 +82,10 @@ int main(int argc, char *argv[]) {
 
 
     // create cartesian grid communicator, split into rows and gather info about own position / neighbours
-    const int dims[] = {Q, Q}, periods[] = {1, 1}, includedDims[] = {1, 0};
+    const int dims[] = {Q, Q}, periods[] = {1, 1}, includedDims[] = {0, 1};
     MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 0, &commGrid);
     MPI_Cart_sub(commGrid, includedDims, &commRow);
+
 
     MPI_Comm_rank(commGrid, &myGridRank);
     MPI_Cart_coords(commGrid, myGridRank, 2, coords);
@@ -107,11 +113,13 @@ int main(int argc, char *argv[]) {
         // for q steps
         for (int step = 0; step < Q; ++step) {
 
+
             // select starting nodes on diagonal, move diagonal by #step to the right
             // broadcast myMatrix to complete row
             auto activeRank = (step + coords[0]) % Q;
             auto isActive = coords[1] == activeRank;
             auto bcastMatrix = isActive ? myMatrix : otherMatrix;
+
             MPI_Bcast(bcastMatrix, MATRIX_SIZE, MPI_INT, activeRank, commRow);
 
             // multiply received matrix with own matrix
@@ -177,33 +185,60 @@ int main(int argc, char *argv[]) {
  *
  * @param own vector representing a matrix with dimension nxn
  * @param other vector representing a matrix with dimension nxn
- * @param N_OVER_Q matrix dimension
+ * @param N matrix dimension
  */
-void min_plus_matrix_multiply(int* own, const int* other, const int N_OVER_Q){
-    int* result = new int[N_OVER_Q*N_OVER_Q];
+void min_plus_matrix_multiply(int* own, const int* other, const int N){
+    const auto MATRIX_SIZE = N * N;
+    int* result = new int[MATRIX_SIZE];
+    for (int i = 0; i < MATRIX_SIZE; ++i) {
+        result[i] = INF;
+    }
+
 
     int min = 0;
     int tmp = 0;
-    for (int i = 0; i < N_OVER_Q*N_OVER_Q; ++i) {
+    for (int i = 0; i < MATRIX_SIZE; ++i) {
         min = own[i] + other[i];
 
-        for (int k = 0; k < N_OVER_Q; ++k) {
-            tmp = own[(i/N_OVER_Q)*N_OVER_Q + k] + other[k*N_OVER_Q + (i % N_OVER_Q)];
+        for (int k = 0; k < N; ++k) {
+            tmp = own[(i/N)*N + k] + other[k*N + (i % N)];
             if (tmp < min){
                 min = tmp;
             }
         }
         result[i] = min;
     }
+//
+//    for (int i = 0; i < N; ++i) {
+//        for (int j = 0; j < N; ++j) {
+//            for (int k = 0; k < N; ++k) {
+//
+//                auto& value = result[i * N + j];
+//                const auto left = own[i * N + k];
+//                const auto right = other[k * N + j];
+//
+//                if (left == 0 || right == 0) { // infinite path
+//                    continue;
+//                }
+//                if (value == 0) { // anything is better than infinity
+//                    result[i * N + j] = left + right;
+//                } else {
+//                    value = std::min(value, left + right);
+////                std::cout << value << " vs " << left << "+" << right << std::endl;
+//                }
+//            }
+//        }
+//    }
 
     std::cout << "own:" << std::endl;
-    print_submatrix(own, N_OVER_Q);
+    print_submatrix(own, N);
     std::cout << "other:" << std::endl;
-    print_submatrix(other, N_OVER_Q);
+    print_submatrix(other, N);
+    std::copy(result, result + MATRIX_SIZE, own);
+//    std::cout << "result:" << std::endl;
+//    print_submatrix(own, N);
 
-    memcpy(own, result, N_OVER_Q*N_OVER_Q);
-    std::cout << "result:" << std::endl;
-    print_submatrix(own, N_OVER_Q);
+
 
     // cleanup
     delete[] result;
