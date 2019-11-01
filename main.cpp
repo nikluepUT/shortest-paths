@@ -5,10 +5,10 @@
 #include <mpi.h>
 
 constexpr int MASTER = 0;
-constexpr int INF = 0;
+constexpr int INF = 999990;
 
 void min_plus_matrix_multiply(int* own, const int* other, const int N);
-void print_submatrix(const int* matrix, const int N_OVER_Q);
+void print_matrix(const int* matrix, const int N);
 
 int main(int argc, char *argv[]) {
 
@@ -110,6 +110,29 @@ int main(int argc, char *argv[]) {
     // run fox's algorithm until D > N on all nodes
     for (int D = 1; D < N; D *= 2) {
 
+        // gather sub-matrices into myMatrix
+        MPI_Gather(myMatrix, MATRIX_SIZE, MPI_INT, completeMatrix, MATRIX_SIZE, MPI_INT, MASTER, MPI_COMM_WORLD);
+
+        // print result / compare to to optional output file, display computation time
+        if (myWorldRank == MASTER) {
+            std::cout << "D: " << D << "\n";
+            for (int y = 0; y < N; ++y) {
+                for (int x = 0; x < N; ++x) {
+                    int i, j, k;
+                    i = y / N_OVER_Q;
+                    j = x / N_OVER_Q;
+                    k = (y % N_OVER_Q) * N_OVER_Q + (x % N_OVER_Q);
+
+                    std::cout << completeMatrix[
+                            i * N_OVER_Q * N +
+                            j * MATRIX_SIZE +
+                            k];
+                    std::cout << " ";
+                }
+                std::cout << std::endl;
+            }
+        }
+
         // for q steps
         for (int step = 0; step < Q; ++step) {
 
@@ -118,21 +141,22 @@ int main(int argc, char *argv[]) {
             // broadcast myMatrix to complete row
             auto activeRank = (step + coords[0]) % Q;
             auto isActive = coords[1] == activeRank;
-            auto bcastMatrix = isActive ? myMatrix : otherMatrix;
+            if (isActive) {
+                std::copy(myMatrix, myMatrix + MATRIX_SIZE, otherMatrix);
+            }
 
-            MPI_Bcast(bcastMatrix, MATRIX_SIZE, MPI_INT, activeRank, commRow);
+            MPI_Bcast(otherMatrix, MATRIX_SIZE, MPI_INT, activeRank, commRow);
 
             // multiply received matrix with own matrix
             if (!isActive) {
-                min_plus_matrix_multiply(myMatrix, otherMatrix, N_OVER_Q);
+                min_plus_matrix_multiply(otherMatrix, myMatrix, N_OVER_Q);
             }
 
             // send myMatrix to node directly above, multiply received myMatrix with own data
             MPI_Sendrecv(
-                    myMatrix, MATRIX_SIZE, MPI_INT, upRank, 0,
-                    otherMatrix, MATRIX_SIZE, MPI_INT, downRank, 0, commGrid, nullptr
+                    otherMatrix, MATRIX_SIZE, MPI_INT, upRank, 0,
+                    myMatrix, MATRIX_SIZE, MPI_INT, downRank, 0, commGrid, nullptr
             );
-            min_plus_matrix_multiply(myMatrix, otherMatrix, N_OVER_Q);
         }
     }
 
@@ -208,12 +232,15 @@ void min_plus_matrix_multiply(int* own, const int* other, const int N){
         }
         result[i] = min;
     }
-//
+
 //    for (int i = 0; i < N; ++i) {
 //        for (int j = 0; j < N; ++j) {
+//
+//            auto& value = result[i * N + j];
+//            value = INF;
+//
 //            for (int k = 0; k < N; ++k) {
 //
-//                auto& value = result[i * N + j];
 //                const auto left = own[i * N + k];
 //                const auto right = other[k * N + j];
 //
@@ -224,29 +251,19 @@ void min_plus_matrix_multiply(int* own, const int* other, const int N){
 //                    result[i * N + j] = left + right;
 //                } else {
 //                    value = std::min(value, left + right);
-////                std::cout << value << " vs " << left << "+" << right << std::endl;
 //                }
 //            }
 //        }
 //    }
 
-    std::cout << "own:" << std::endl;
-    print_submatrix(own, N);
-    std::cout << "other:" << std::endl;
-    print_submatrix(other, N);
     std::copy(result, result + MATRIX_SIZE, own);
-//    std::cout << "result:" << std::endl;
-//    print_submatrix(own, N);
-
-
-
     // cleanup
     delete[] result;
 }
 
-void print_submatrix(const int* matrix, const int N_OVER_Q){
-    for (int i = 0; i < N_OVER_Q*N_OVER_Q; ++i) {
-        if (i > 0  && i % N_OVER_Q == 0){
+void print_matrix(const int* matrix, const int N){
+    for (int i = 0; i < N * N; ++i) {
+        if (i > 0  && i % N == 0){
             std::cout << "\n";
         }
         std::cout << matrix[i] << " ";
