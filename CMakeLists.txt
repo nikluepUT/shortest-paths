@@ -10,3 +10,4 @@ SET(CMAKE_C_COMPILER mpicc)
 SET(CMAKE_CXX_COMPILER mpicxx)
 
 add_executable(shortest-paths main.cpp)
+add_executable(mult mult.cpp)
