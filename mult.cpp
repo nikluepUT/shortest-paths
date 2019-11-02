@@ -65,5 +65,6 @@ int main() {
 
     print_matrix(completeMatrix, N);
 
+    delete[] completeMatrix;
     return 0;
 }
