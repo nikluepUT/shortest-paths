@@ -2,32 +2,19 @@
 
 constexpr int INF = 999999;
 
-void min_plus_matrix_multiply(int* own, const int* other, const int N){
+void min_plus_matrix_multiply(const int* matrixA, const int* matrixB, int* result, const int N){
     const auto MATRIX_SIZE = N * N;
-    int* result = new int[MATRIX_SIZE];
-    for (int i = 0; i < MATRIX_SIZE; ++i) {
-        result[i] = INF;
-    }
 
 
-    int min = 0;
     int tmp = 0;
     for (int i = 0; i < MATRIX_SIZE; ++i) {
-        min = own[i] + other[i];
-
         for (int k = 0; k < N; ++k) {
-            tmp = own[(i/N)*N + k] + other[k*N + (i % N)];
-            if (tmp < min){
-                min = tmp;
+            tmp = matrixA[(i / N) * N + k] + matrixB[k * N + (i % N)];
+            if (tmp < result[i]){
+                result[i] = tmp;
             }
         }
-        result[i] = min;
     }
-
-
-    std::copy(result, result + MATRIX_SIZE, own);
-    // cleanup
-    delete[] result;
 }
 
 void print_matrix(const int* matrix, const int N){
@@ -47,6 +34,8 @@ int main() {
     std::cin >> N;
 
     auto completeMatrix = new int[N * N];
+    auto result = new int[N*N];
+    std::fill(result, result + N*N, INF);
     for (int y = 0; y < N; ++y) {
         for (int x = 0; x < N; ++x) {
 
@@ -60,11 +49,13 @@ int main() {
     }
 
     for (int D = 1; D < N; D *= 2) {
-        min_plus_matrix_multiply(completeMatrix, completeMatrix, N);
+        min_plus_matrix_multiply(completeMatrix, completeMatrix, result, N);
+        std::copy(result, result + N*N, completeMatrix);
     }
 
-    print_matrix(completeMatrix, N);
+    print_matrix(result, N);
 
     delete[] completeMatrix;
+    delete[] result;
     return 0;
 }

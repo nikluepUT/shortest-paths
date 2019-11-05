@@ -5,9 +5,9 @@
 #include <mpi.h>
 
 constexpr int MASTER = 0;
-constexpr int INF = 999990;
+constexpr int INF = std::numeric_limits<int>::max() / 2;
 
-void min_plus_matrix_multiply(int* own, const int* other, const int N);
+void min_plus_matrix_multiply(const int* matrixA, const int* matrixB, int* result, const int N);
 void print_matrix(const int* matrix, const int N);
 
 int main(int argc, char *argv[]) {
@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
     // setup
     double startTime, endTime;
     int N, P, Q, N_OVER_Q, MATRIX_SIZE;
-    int *completeMatrix = nullptr, *myMatrix, *otherMatrix;
+    int *completeMatrix = nullptr, *myMatrix, *result, *matrixA, *matrixB, *otherMatrixA;
 
     MPI_Comm commGrid, commRow;
     int myWorldRank, myGridRank, coords[2], upRank, downRank;
@@ -98,71 +98,54 @@ int main(int argc, char *argv[]) {
 
 
     // scatter matrix
-    myMatrix = new int[N_OVER_Q * N_OVER_Q];
-    otherMatrix = new int[N_OVER_Q * N_OVER_Q];
+
+    result = new int[MATRIX_SIZE];
+    myMatrix = new int[MATRIX_SIZE];
+    matrixA = new int[MATRIX_SIZE];
+    matrixB = new int[MATRIX_SIZE];
+    otherMatrixA = new int[MATRIX_SIZE];
+
     MPI_Scatter(
             completeMatrix, MATRIX_SIZE, MPI_INT,
             myMatrix, MATRIX_SIZE, MPI_INT,
             MASTER, commGrid
     );
 
+    std::copy(myMatrix, myMatrix + MATRIX_SIZE, matrixA);
+    std::copy(myMatrix, myMatrix + MATRIX_SIZE, matrixB);
+    std::fill(result, result + MATRIX_SIZE, INF);
 
     // run fox's algorithm until D > N on all nodes
     for (int D = 1; D < N; D *= 2) {
 
-        // gather sub-matrices into myMatrix
-        MPI_Gather(myMatrix, MATRIX_SIZE, MPI_INT, completeMatrix, MATRIX_SIZE, MPI_INT, MASTER, MPI_COMM_WORLD);
-
-        // print result / compare to to optional output file, display computation time
-        if (myWorldRank == MASTER) {
-            std::cout << "D: " << D << "\n";
-            for (int y = 0; y < N; ++y) {
-                for (int x = 0; x < N; ++x) {
-                    int i, j, k;
-                    i = y / N_OVER_Q;
-                    j = x / N_OVER_Q;
-                    k = (y % N_OVER_Q) * N_OVER_Q + (x % N_OVER_Q);
-
-                    std::cout << completeMatrix[
-                            i * N_OVER_Q * N +
-                            j * MATRIX_SIZE +
-                            k];
-                    std::cout << " ";
-                }
-                std::cout << std::endl;
-            }
-        }
-
         // for q steps
         for (int step = 0; step < Q; ++step) {
-
 
             // select starting nodes on diagonal, move diagonal by #step to the right
             // broadcast myMatrix to complete row
             auto activeRank = (step + coords[0]) % Q;
             auto isActive = coords[1] == activeRank;
+
             if (isActive) {
-                std::copy(myMatrix, myMatrix + MATRIX_SIZE, otherMatrix);
-            }
-
-            MPI_Bcast(otherMatrix, MATRIX_SIZE, MPI_INT, activeRank, commRow);
-
-            // multiply received matrix with own matrix
-            if (!isActive) {
-                min_plus_matrix_multiply(otherMatrix, myMatrix, N_OVER_Q);
+                MPI_Bcast(matrixA, MATRIX_SIZE, MPI_INT, activeRank, commRow);
+                min_plus_matrix_multiply(matrixA, matrixB, result, N_OVER_Q);
+            } else {
+                MPI_Bcast(otherMatrixA, MATRIX_SIZE, MPI_INT, activeRank, commRow);
+                min_plus_matrix_multiply(otherMatrixA, matrixB, result, N_OVER_Q);
             }
 
             // send myMatrix to node directly above, multiply received myMatrix with own data
-            MPI_Sendrecv(
-                    otherMatrix, MATRIX_SIZE, MPI_INT, upRank, 0,
-                    myMatrix, MATRIX_SIZE, MPI_INT, downRank, 0, commGrid, nullptr
-            );
+            MPI_Sendrecv_replace(matrixB, MATRIX_SIZE, MPI_INT, upRank, 0, downRank, 0, commGrid, nullptr);
         }
+
+        std::copy(result, result + MATRIX_SIZE, matrixA);
+        std::copy(result, result + MATRIX_SIZE, matrixB);
+        std::fill(result, result + MATRIX_SIZE, INF);
     }
 
 
     // gather sub-matrices into myMatrix
-    MPI_Gather(myMatrix, MATRIX_SIZE, MPI_INT, completeMatrix, MATRIX_SIZE, MPI_INT, MASTER, MPI_COMM_WORLD);
+    MPI_Gather(matrixA, MATRIX_SIZE, MPI_INT, completeMatrix, MATRIX_SIZE, MPI_INT, MASTER, MPI_COMM_WORLD);
 
     // print result / compare to to optional output file, display computation time
     if (myWorldRank == MASTER) {
@@ -177,10 +160,11 @@ int main(int argc, char *argv[]) {
                 j = x / N_OVER_Q;
                 k = (y % N_OVER_Q) * N_OVER_Q + (x % N_OVER_Q);
 
-                std::cout << completeMatrix[
+                auto num = completeMatrix[
                         i * N_OVER_Q * N +
                         j * MATRIX_SIZE +
                         k];
+                std::cout << (num >= INF ? 0 : num);
                 std::cout << " ";
             }
             std::cout << std::endl;
@@ -191,7 +175,10 @@ int main(int argc, char *argv[]) {
         delete[] completeMatrix;
     }
     delete[] myMatrix;
-    delete[] otherMatrix;
+    delete[] result;
+    delete[] matrixA;
+    delete[] matrixB;
+    delete[] otherMatrixA;
 
     MPI_Comm_free(&commGrid);
     MPI_Comm_free(&commRow); // not sure if necessary, example does not include this
@@ -207,58 +194,23 @@ int main(int argc, char *argv[]) {
  * In other words: c_ij is the smallest sum of A k's row and B k's column.
  * The resulting product is copied to the own matrix.
  *
- * @param own vector representing a matrix with dimension nxn
- * @param other vector representing a matrix with dimension nxn
+ * @param matrixA vector representing a matrix with dimension nxn
+ * @param matrixB vector representing a matrix with dimension nxn
  * @param N matrix dimension
  */
-void min_plus_matrix_multiply(int* own, const int* other, const int N){
+void min_plus_matrix_multiply(const int* matrixA, const int* matrixB, int* result, const int N){
     const auto MATRIX_SIZE = N * N;
-    int* result = new int[MATRIX_SIZE];
-    for (int i = 0; i < MATRIX_SIZE; ++i) {
-        result[i] = INF;
-    }
 
 
-    int min = 0;
     int tmp = 0;
     for (int i = 0; i < MATRIX_SIZE; ++i) {
-        min = own[i] + other[i];
-
         for (int k = 0; k < N; ++k) {
-            tmp = own[(i/N)*N + k] + other[k*N + (i % N)];
-            if (tmp < min){
-                min = tmp;
+            tmp = matrixA[(i / N) * N + k] + matrixB[k * N + (i % N)];
+            if (tmp < result[i]){
+                result[i] = tmp;
             }
         }
-        result[i] = min;
     }
-
-//    for (int i = 0; i < N; ++i) {
-//        for (int j = 0; j < N; ++j) {
-//
-//            auto& value = result[i * N + j];
-//            value = INF;
-//
-//            for (int k = 0; k < N; ++k) {
-//
-//                const auto left = own[i * N + k];
-//                const auto right = other[k * N + j];
-//
-//                if (left == 0 || right == 0) { // infinite path
-//                    continue;
-//                }
-//                if (value == 0) { // anything is better than infinity
-//                    result[i * N + j] = left + right;
-//                } else {
-//                    value = std::min(value, left + right);
-//                }
-//            }
-//        }
-//    }
-
-    std::copy(result, result + MATRIX_SIZE, own);
-    // cleanup
-    delete[] result;
 }
 
 void print_matrix(const int* matrix, const int N){
