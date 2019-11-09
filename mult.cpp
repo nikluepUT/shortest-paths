@@ -1,6 +1,8 @@
 #include <iostream>
+#include <limits>
 
-constexpr int INF = 999999;
+
+constexpr int INF = std::numeric_limits<int>::max() / 2;
 
 void min_plus_matrix_multiply(const int* matrixA, const int* matrixB, int* result, const int N){
     const auto MATRIX_SIZE = N * N;

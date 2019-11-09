@@ -75,10 +75,10 @@ int main(int argc, char *argv[]) {
         MPI_Bcast(&N, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
         MPI_Bcast(&Q, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
         N_OVER_Q = N / Q;
+        MATRIX_SIZE = N_OVER_Q*N_OVER_Q;
 
         MPI_Barrier(MPI_COMM_WORLD);
     }
-    MATRIX_SIZE = N_OVER_Q*N_OVER_Q;
 
 
     // create cartesian grid communicator, split into rows and gather info about own position / neighbours
@@ -98,7 +98,6 @@ int main(int argc, char *argv[]) {
 
 
     // scatter matrix
-
     result = new int[MATRIX_SIZE];
     myMatrix = new int[MATRIX_SIZE];
     matrixA = new int[MATRIX_SIZE];
@@ -122,7 +121,7 @@ int main(int argc, char *argv[]) {
         for (int step = 0; step < Q; ++step) {
 
             // select starting nodes on diagonal, move diagonal by #step to the right
-            // broadcast myMatrix to complete row
+            // broadcast matrixA to complete row
             auto activeRank = (step + coords[0]) % Q;
             auto isActive = coords[1] == activeRank;
 
@@ -134,7 +133,7 @@ int main(int argc, char *argv[]) {
                 min_plus_matrix_multiply(otherMatrixA, matrixB, result, N_OVER_Q);
             }
 
-            // send myMatrix to node directly above, multiply received myMatrix with own data
+            // send matrixB to node directly above
             MPI_Sendrecv_replace(matrixB, MATRIX_SIZE, MPI_INT, upRank, 0, downRank, 0, commGrid, nullptr);
         }
 
@@ -144,10 +143,10 @@ int main(int argc, char *argv[]) {
     }
 
 
-    // gather sub-matrices into myMatrix
+    // gather sub-matrices
     MPI_Gather(matrixA, MATRIX_SIZE, MPI_INT, completeMatrix, MATRIX_SIZE, MPI_INT, MASTER, MPI_COMM_WORLD);
 
-    // print result / compare to to optional output file, display computation time
+    // print result / display computation time
     if (myWorldRank == MASTER) {
 
         endTime = MPI_Wtime();
