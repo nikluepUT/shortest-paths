@@ -190,7 +190,7 @@ int main(int argc, char *argv[]) {
 /**
  * The min-plus product C of two matrices A and B is defined as:
  * c_ij = min_k{a_ik + b_kj}
- * In other words: c_ij is the smallest sum of A k's row and B k's column.
+ * In other words: c_ij is the smallest sum of A i's row and B j's column.
  * The resulting product is copied to the own matrix.
  *
  * @param matrixA vector representing a matrix with dimension nxn
@@ -210,14 +210,4 @@ void min_plus_matrix_multiply(const int* matrixA, const int* matrixB, int* resul
             }
         }
     }
-}
-
-void print_matrix(const int* matrix, const int N){
-    for (int i = 0; i < N * N; ++i) {
-        if (i > 0  && i % N == 0){
-            std::cout << "\n";
-        }
-        std::cout << matrix[i] << " ";
-    }
-    std::cout << std::endl;
 }
